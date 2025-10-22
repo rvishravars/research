@@ -1,0 +1,77 @@
+@startuml
+title asgn1 Ramdisk: Operation Scenarios
+
+actor "User App" as App
+
+box "asgn1 Driver" #LightBlue
+    participant "File Operations" as Fops
+    database "Ramdisk Storage" as GDev
+end box
+
+box "Kernel MMU" #LightGreen
+    participant "Page Fault Handler" as PFH
+end box
+
+== Write "hello" to device ==
+App -> Fops : open("/dev/asgn1", O_RDWR)
+activate Fops
+note right of Fops: Open with Read/Write
+Fops --> App : fd
+deactivate Fops
+
+... writing ...
+
+App -> Fops : write(fd, "hello", 5)
+activate Fops
+Fops -> GDev : lock()
+Fops -> GDev : allocate 1 page
+Fops -> GDev : copy "hello" to page
+Fops -> GDev : update size to 5 bytes
+Fops -> GDev : unlock()
+Fops --> App : 5 (bytes written)
+deactivate Fops
+
+== Seek to start and Read back ==
+
+App -> Fops : lseek(fd, 0, SEEK_SET)
+activate Fops
+note right of Fops: Reset position to beginning
+Fops --> App : 0 (new position)
+deactivate Fops
+
+... reading ...
+
+App -> Fops : read(fd, buffer, 5)
+activate Fops
+Fops -> GDev : lock()
+Fops -> GDev : find page 0
+Fops -> GDev : copy "hello" from page
+Fops -> GDev : unlock()
+Fops --> App : 5 (bytes read)
+deactivate Fops
+
+== mmap and Page Fault Scenario ==
+
+App -> Fops : mmap(fd, size, ...)
+activate Fops
+note right of Fops: Kernel calls asgn1_mmap
+Fops -> Fops : Set VMA operations to asgn1_vm_ops
+Fops --> App : mmap_ptr
+deactivate Fops
+
+... some time later, app accesses mapped memory ...
+
+App -> App : Access mmap_ptr[i]
+note right of App: Triggers a Page Fault!
+
+PFH -> Fops : asgn1_vma_fault(vmf)
+activate Fops
+note right of Fops: Fault for page at offset vmf->pgoff
+Fops -> GDev : lock()
+Fops -> GDev : find page for the faulting address
+note right of Fops: Page found, now increment its ref count\nso it isn't freed while mapped.
+Fops -> Fops : get_page(retrieved_page)
+Fops -> GDev : unlock()
+Fops -> PFH : return retrieved_page
+deactivate Fops
+@enduml
